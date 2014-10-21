@@ -71,7 +71,9 @@ class API(object):
                 ret = ret + self.serialize_data(k)
         elif type(data) == types.DictType:
             for k in sorted(data.keys(), key=lambda s: str(s)):
-                ret = ret + k + self.serialize_data(data[k]) 
+                ret = ret + k + self.serialize_data(data[k])
+        elif type(data) == types.UnicodeType:
+                return unicode(data)
         elif data is not None:
             return str(data)
         return ret

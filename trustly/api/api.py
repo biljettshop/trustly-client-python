@@ -72,8 +72,10 @@ class API(object):
         elif type(data) == types.DictType:
             for k in sorted(data.keys(), key=lambda s: str(s)):
                 ret = ret + k + self.serialize_data(data[k])
+        elif type(data) == types.UnicodeType:
+                return unicode(data).encode('utf-8')
         elif data is not None:
-            return unicode(data).encode('utf-8')
+            return str(data)
         return ret
 
     def _verify_trustly_signed_data(self, method, uuid, signature, data):

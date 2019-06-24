@@ -71,7 +71,7 @@ class API(object):
         self.api_host = api_host
         self.api_port = api_port
 
-        self.trustly_publickey = serialization.load_pem_public_key(trustly_pkey_str)
+        self.trustly_publickey = serialization.load_pem_public_key(trustly_pkey_str, default_backend())
         self.trustly_verifyer = self.trustly_publickey
 
     def serialize_data(self, data=None):

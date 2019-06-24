@@ -70,7 +70,7 @@ class SignedAPI(trustly.api.api.API):
         self.use_merchant_privatekey(cert)
 
     def use_merchant_privatekey(self, cert):
-        self.merchant_privatekey = serialization.load_pem_private_key(cert)
+        self.merchant_privatekey = serialization.load_pem_private_key(cert, default_backend())
         self.merchant_signer = self.merchant_privatekey
 
     def sign_merchant_request(self, data):

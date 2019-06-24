@@ -22,7 +22,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 """
 
-import httplib
+from __future__ import absolute_import
+import six.moves.http_client
 import uuid
 import base64
 from Crypto.Signature import PKCS1_v1_5
@@ -32,7 +33,8 @@ from Crypto.PublicKey import RSA
 import trustly.api.api
 import trustly.exceptions
 import trustly.data.jsonrpcrequest
-import trustly.data.jsonrpcresponse
+import trustly.data.jsonrpcsignedresponse
+import six
 
 class SignedAPI(trustly.api.api.API):
         # Basic key management, the actual key and the imported class
@@ -45,18 +47,24 @@ class SignedAPI(trustly.api.api.API):
     api_username = None
     api_password = None
 
-    def __init__(self, merchant_privatekeyfile, username, password, host='trustly.com', port=443, is_https=True):
+    def __init__(self, merchant_privatekey, username, password, host='trustly.com', port=443, is_https=True):
 
         super(SignedAPI, self).__init__(host=host, port=port, is_https=is_https)
 
         self.api_username = username
         self.api_password = password
 
-        if merchant_privatekeyfile is not None:
-            self.load_merchant_privatekey(merchant_privatekeyfile)
+        if isinstance(merchant_privatekey, six.string_types):
+            merchant_privatekey = merchant_privatekey.encode()
+
+        if merchant_privatekey is not None:
+            if merchant_privatekey.find(b"\n") > -1:
+                self.use_merchant_privatekey(merchant_privatekey)
+            else:
+                self.load_merchant_privatekey(merchant_privatekey)
 
     def load_merchant_privatekey(self, filename):
-        pkeyfile = file(filename, 'r')
+        pkeyfile = open(filename, 'r')
         cert = pkeyfile.read()
         pkeyfile.close()
         self.use_merchant_privatekey(cert)
@@ -81,10 +89,13 @@ class SignedAPI(trustly.api.api.API):
         if data is None:
             data = {}
 
-        plaintext = method + uuid + self.serialize_data(data)
-        sha1hash = SHA.new(plaintext)
+        plaintext = six.text_type(method + uuid + self.serialize_data(data))
+        sha1hash = SHA.new(plaintext.encode('utf-8'))
         signature = self.merchant_signer.sign(sha1hash)
-        return base64.b64encode(signature)
+        if six.PY2:
+            return base64.b64encode(signature)
+        else:
+            return base64.b64encode(signature).decode()
 
     def insert_credentials(self, request):
         request.set_data('Username', self.api_username)
@@ -92,7 +103,7 @@ class SignedAPI(trustly.api.api.API):
         request.set_param('Signature', self.sign_merchant_request(request))
 
     def handle_response(self, request, httpcall):
-        response = trustly.data.jsonrpcresponse.JSONRPCResponse(httpcall)
+        response = trustly.data.jsonrpcsignedresponse.JSONRPCSignedResponse(httpcall)
 
         if not self.verify_trustly_signed_response(response):
             raise trustly.exceptions.TrustlySignatureError('Incoming message signature is not valid', response)
@@ -118,39 +129,57 @@ class SignedAPI(trustly.api.api.API):
 
         return super(SignedAPI, self).call(request)
 
-    def deposit(self, notificationurl, enduserid, messageid, 
+    def deposit(self, notificationurl, enduserid, messageid,
             locale=None, amount=None, currency=None, country=None, ip=None,
             successurl=None, failurl=None, templateurl=None, urltarget=None,
             mobilephone=None, firstname=None, lastname=None,
             nationalidentificationnumber=None, shopperstatement=None,
             suggestedminamount=None, suggestedmaxamount=None,
-            integrationmodule=None):
+            integrationmodule=None, holdnotifications=None,
+            email=None, shippingaddresscountry=None,
+            shippingaddresspostalcode=None, shippingaddresscity=None,
+            shippingaddressline1=None, shippingaddressline2=None,
+            shippingaddress=None, unchangeablenationalidentificationnumber=None):
+
+        attributes = dict(
+                Locale=locale,
+                Amount=amount,
+                Currency=currency,
+                Country=country,
+                IP=ip,
+                SuccessURL=successurl,
+                FailURL=failurl,
+                TemplateURL=templateurl,
+                URLTarget=urltarget,
+                MobilePhone=mobilephone,
+                Firstname=firstname,
+                Lastname=lastname,
+                NationalIdentificationNumber=nationalidentificationnumber,
+                ShopperStatement=shopperstatement,
+                SuggestedMinAmount=suggestedminamount,
+                SuggestedMaxAmount=suggestedmaxamount,
+                IntegrationModule=integrationmodule,
+                Email=email,
+                ShippingAddressCountry=shippingaddresscountry,
+                ShippingAddressPostalcode=shippingaddresspostalcode,
+                ShippingAddressCity=shippingaddresscity,
+                ShippingAddressLine1=shippingaddressline1,
+                ShippingAddressLine2=shippingaddressline2,
+                ShippingAddress=shippingaddress
+                )
+
+        if holdnotifications:
+            attributes['HoldNotifications'] = 1
+        if unchangeablenationalidentificationnumber:
+            attributes['UnchangeableNationalIdentificationNumber'] = 1
 
         data = trustly.data.jsonrpcrequest.JSONRPCRequest(method='Deposit',
                 data=dict(
-                        NotificationURL=notificationurl,
-                        EndUserID=enduserid,
-                        MessageID=messageid
-                        ),
-                attributes=dict(
-                        Locale=locale,
-                        Amount=amount,
-                        Currency=currency,
-                        Country=country,
-                        IP=ip,
-                        SuccessURL=successurl,
-                        FailURL=failurl,
-                        TemplateURL=templateurl,
-                        URLTarget=urltarget,
-                        MobilePhone=mobilephone,
-                        Firstname=firstname,
-                        Lastname=lastname,
-                        NationalIdentificationNumber=nationalidentificationnumber,
-                        ShopperStatement=shopperstatement,
-                        SuggestedMinAmount=suggestedminamount,
-                        SuggestedMaxAmount=suggestedmaxamount,
-                        IntegrationModule=integrationmodule
-                        )
+                    NotificationURL=notificationurl,
+                    EndUserID=enduserid,
+                    MessageID=messageid
+                    ),
+                attributes=attributes
                 )
         return self.call(data)
 
@@ -159,31 +188,46 @@ class SignedAPI(trustly.api.api.API):
             locale=None, country=None, ip=None, templateurl=None,
             clearinghouse=None, banknumber=None, accountnumber=None,
             firstname=None, lastname=None, mobilephone=None,
-            nationalidentificationnumber=None, address=None):
+            nationalidentificationnumber=None, address=None,
+            holdnotifications=None, email=None, dateofbirth=None,
+            addresscountry=None,
+            addresspostalcode=None, addresscity=None,
+            addressline1=None, addressline2=None):
+
+        attributes = dict(
+                Locale=locale,
+                Country=country,
+                IP=ip,
+                TemplateURL=templateurl,
+                ClearingHouse=clearinghouse,
+                BankNumber=banknumber,
+                AccountNumber=accountnumber,
+                Firstname=firstname,
+                Lastname=lastname,
+                MobilePhone=mobilephone,
+                NationalIdentificationNumber=nationalidentificationnumber,
+                Email=email,
+                DateOfBirth=dateofbirth,
+                AddressCountry=addresscountry,
+                AddressPostalcode=addresspostalcode,
+                AddressCity=addresscity,
+                AddressLine1=addressline1,
+                AddressLine2=addressline2,
+                Address=address
+                )
+
+        if holdnotifications:
+            attributes['HoldNotifications'] = 1
 
         data = trustly.data.jsonrpcrequest.JSONRPCRequest(method='Withdraw',
                 data=dict(
-                        NotificationURL=notificationurl,
-                        EndUserID=enduserid,
-                        MessageID=messageid,
-                        Currency=currency,
-                        Amount=None
-                        ),
-
-                attributes=dict(
-                        Locale=locale,
-                        Country=country,
-                        IP=ip,
-                        TemplateURL=templateurl,
-                        ClearingHouse=clearinghouse,
-                        BankNumber=banknumber,
-                        AccountNumber=accountnumber,
-                        Firstname=firstname,
-                        Lastname=lastname,
-                        MobilePhone=mobilephone,
-                        NationalIdentificationNumber=nationalidentificationnumber,
-                        Address=address
-                        )
+                    NotificationURL=notificationurl,
+                    EndUserID=enduserid,
+                    MessageID=messageid,
+                    Currency=currency,
+                    Amount=None
+                    ),
+                attributes=attributes
                 )
         return self.call(data)
 
@@ -220,48 +264,76 @@ class SignedAPI(trustly.api.api.API):
         return self.call(data)
 
     def selectaccount(self, notificationurl, enduserid, messageid,
-            locale=None, country=None, ip=None, successurl=None, urltarget=None,
-            mobilephone=None, firstname=None, lastname=None):
+            locale=None, country=None, ip=None, successurl=None,
+            failurl=None, templateurl=None, urltarget=None,
+            mobilephone=None, firstname=None, lastname=None,
+            holdnotifications=None, email=None, dateofbirth=None,
+            requestdirectdebitmandate=None):
+
+        attributes = dict(
+                Locale=locale,
+                Country=country,
+                IP=ip,
+                SuccessURL=successurl,
+                FailURL=failurl,
+                TemplateURL=templateurl,
+                URLTarget=urltarget,
+                MobilePhone=mobilephone,
+                Firstname=firstname,
+                Lastname=lastname,
+                Email=email,
+                DateOfBirth=dateofbirth
+                )
+
+        if holdnotifications:
+            attributes['HoldNotifications'] = 1
+        if requestdirectdebitmandate:
+            attributes['RequestDirectDebitMandate'] = 1
 
         data = trustly.data.jsonrpcrequest.JSONRPCRequest(method='SelectAccount',
                 data=dict(
-                        NotificationURL=notificationurl,
-                        EndUserID=enduserid,
-                        MessageID=messageid
-                        ),
-
-                attributes=dict(
-                        Locale=locale,
-                        Country=country,
-                        IP=ip,
-                        SuccessURL=successurl,
-                        URLTarget=urltarget,
-                        MobilePhone=mobilephone,
-                        Firstname=firstname,
-                        Lastname=lastname
-                        )
+                    NotificationURL=notificationurl,
+                    EndUserID=enduserid,
+                    MessageID=messageid
+                    ),
+                attributes=attributes
                 )
         return self.call(data)
 
     def registeraccount(self, enduserid, clearinghouse, banknumber,
             accountnumber, firstname, lastname, mobilephone=None,
-            nationalidentificationnumber=None, address=None):
+            nationalidentificationnumber=None, address=None,
+            holdnotifications=None, email=None, dateofbirth=None,
+            addresscountry=None,
+            addresspostalcode=None, addresscity=None,
+            addressline1=None, addressline2=None):
+
+        attributes = dict(
+                MobilePhone=mobilephone,
+                NationalIdentificationNumber=nationalidentificationnumber,
+                Email=email,
+                DateOfBirth=dateofbirth,
+                AddressCountry=addresscountry,
+                AddressPostalcode=addresspostalcode,
+                AddressCity=addresscity,
+                AddressLine1=addressline1,
+                AddressLine2=addressline2,
+                Address=address
+                )
+
+        if holdnotifications:
+            attributes['HoldNotifications'] = 1
 
         data = trustly.data.jsonrpcrequest.JSONRPCRequest(method='RegisterAccount',
                 data=dict(
-                        EndUserID=enduserid,
-                        ClearingHouse=clearinghouse,
-                        BankNumber=banknumber,
-                        AccountNumber=accountnumber,
-                        Firstname=firstname,
-                        Lastname=lastname
-                        ),
-
-                attributes=dict(
-                        MobilePhone=mobilephone,
-                        NationalIdentificationNumber=nationalidentificationnumber,
-                        Address=address
-                        )
+                    EndUserID=enduserid,
+                    ClearingHouse=clearinghouse,
+                    BankNumber=banknumber,
+                    AccountNumber=accountnumber,
+                    Firstname=firstname,
+                    Lastname=lastname
+                    ),
+                attributes=attributes
                 )
         return self.call(data)
 
@@ -270,49 +342,59 @@ class SignedAPI(trustly.api.api.API):
 
         data = trustly.data.jsonrpcrequest.JSONRPCRequest(method='AccountPayout',
                 data=dict(
-                        NotificationURL=notificationurl,
-                        AccountID=accountid,
-                        EndUserID=enduserid,
-                        MessageID=messageid,
-                        Amount=amount,
-                        Currency=currency
-                        ),
-
+                    NotificationURL=notificationurl,
+                    AccountID=accountid,
+                    EndUserID=enduserid,
+                    MessageID=messageid,
+                    Amount=amount,
+                    Currency=currency
+                    ),
                 attributes=dict(
-                        )
+                    )
                 )
         return self.call(data)
 
-    def p2p(self, notificationurl, enduserid, messageid, ip,
-            authorizeonly=None, templatedata=None, successurl=None,
-            method=None, lastname=None, firstname=None, urltarget=None,
-            locale=None, amount=None, currency=None, templateurl=None,
-            displaycurrency=None):
+    def p2p(self, notificationurl, enduserid, messageid,
+            locale=None, amount=None, currency=None, country=None, ip=None,
+            successurl=None, failurl=None, templateurl=None, urltarget=None,
+            mobilephone=None, firstname=None, lastname=None,
+            nationalidentificationnumber=None, shopperstatement=None,
+            suggestedminamount=None, suggestedmaxamount=None,
+            integrationmodule=None, holdnotifications=None,
+            authorizeonly=None, templatedata=None):
 
-        authorizeonly = self.api_bool(authorizeonly)
+        attributes = dict(
+                AuthorizeOnly=self.api_bool(authorizeonly),
+                TemplateData=templatedata,
+                Locale=locale,
+                Amount=amount,
+                Currency=currency,
+                Country=country,
+                IP=ip,
+                SuccessURL=successurl,
+                FailURL=failurl,
+                TemplateURL=templateurl,
+                URLTarget=urltarget,
+                MobilePhone=mobilephone,
+                Firstname=firstname,
+                Lastname=lastname,
+                NationalIdentificationNumber=nationalidentificationnumber,
+                ShopperStatement=shopperstatement,
+                SuggestedMinAmount=suggestedminamount,
+                SuggestedMaxAmount=suggestedmaxamount,
+                IntegrationModule=integrationmodule
+                )
+
+        if holdnotifications:
+            attributes['HoldNotifications'] = 1
 
         data = trustly.data.jsonrpcrequest.JSONRPCRequest(method='P2P',
                 data=dict(
-                        NotificationURL=notificationurl,
-                        EndUserID=enduserid,
-                        MessageID=messageid
-                        ),
-
-                attributes=dict(
-                    AuthorizeOnly=authorizeonly,
-                    TemplateData=templatedata,
-                    SuccessURL=successurl,
-                    Method=method,
-                    Lastname=lastname,
-                    Firstname=firstname,
-                    URLTarget=urltarget,
-                    Locale=locale,
-                    Amount=amount,
-                    TemplateURL=templateurl,
-                    Currency=currency,
-                    DisplayCurrency=displaycurrency,
-                    IP=ip
-                    )
+                    NotificationURL=notificationurl,
+                    EndUserID=enduserid,
+                    MessageID=messageid
+                    ),
+                attributes=attributes
                 )
         return self.call(data)
 
@@ -320,10 +402,10 @@ class SignedAPI(trustly.api.api.API):
 
         data = trustly.data.jsonrpcrequest.JSONRPCRequest(method='Capture',
                 data=dict(
-                        OrderID=orderid,
-                        Amount=amount,
-                        Currency=currency
-                        ),
+                    OrderID=orderid,
+                    Amount=amount,
+                    Currency=currency
+                    ),
 
                 attributes=dict(
                     )
@@ -334,18 +416,51 @@ class SignedAPI(trustly.api.api.API):
 
         data = trustly.data.jsonrpcrequest.JSONRPCRequest(method='Void',
                 data=dict(
-                        OrderID=orderid
-                        ),
+                    OrderID=orderid
+                    ),
 
                 attributes=dict(
                     )
                 )
         return self.call(data)
 
+    def charge(self, accountid, notificationurl, enduserid, messageid,
+            amount, currency, shopperstatement=None):
+
+        attributes = dict(
+                ShopperStatement=shopperstatement
+                )
+
+        data = trustly.data.jsonrpcrequest.JSONRPCRequest(method='Charge',
+                data=dict(
+                    AccountID=accountid,
+                    NotificationURL=notificationurl,
+                    EndUserID=enduserid,
+                    MessageID=messageid,
+                    Amount=amount,
+                    Currency=currency
+                    ),
+                attributes=attributes
+                )
+        return self.call(data)
+
+    def get_withdrawals(self, orderid):
+
+        data = trustly.data.jsonrpcrequest.JSONRPCRequest(method='GetWithdrawals',
+                data=dict(
+                    OrderID=orderid
+                    ),
+
+                attributes=dict(
+                    )
+                )
+        return self.call(data)
 
     def hello(self):
-            # The hello call is not signed, use an unsigned API to do the request and then void it 
+            # The hello call is not signed, use an unsigned API to do the request and then void it
         api = trustly.api.unsigned.UnsignedAPI(username=self.api_username, password=self.api_password,
                 host=self.api_host, port=self.api_port, is_https=self.api_is_https)
 
         return api.hello()
+
+# vim: set et cindent ts=4 ts=4 sw=4:

@@ -22,14 +22,18 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 """
 
-import httplib
+from __future__ import absolute_import
+import functools
 import pkgutil
 import types
 import base64
+import locale
 
 from Crypto.Signature import PKCS1_v1_5
 from Crypto.Hash import SHA
 from Crypto.PublicKey import RSA
+import six
+import six.moves.http_client
 
 import trustly.exceptions
 import trustly.data.jsonrpcnotificationresponse
@@ -52,30 +56,39 @@ class API(object):
     api_port = None
     api_is_https = None
 
-    def __init__(self, host, port, is_https):
-        self.api_host = host
-        self.api_port = port
+    def __init__(self, host='trustly.com', port=443, is_https=True):
+        self.load_trustly_publickey(host, port)
         self.api_is_https = bool(is_https)
 
-        self.load_trustly_publickey()
+    def load_trustly_publickey(self, api_host, api_port):
+        trustly_pkey_str = None
+        try:
+            trustly_pkey_str = pkgutil.get_data('trustly.api', 'keys/{0}:{1}.public.pem'.format(api_host, api_port))
+        except IOError as e:
+            pass
+        if trustly_pkey_str is None:
+            trustly_pkey_str = pkgutil.get_data('trustly.api', 'keys/{0}.public.pem'.format(api_host))
 
-    def load_trustly_publickey(self):
-        trustly_pkey_str = pkgutil.get_data('trustly.api', 'keys/{0}.public.pem'.format(self.api_host))
+        self.api_host = api_host
+        self.api_port = api_port
+
         self.trustly_publickey = RSA.importKey(trustly_pkey_str)
         self.trustly_verifyer = PKCS1_v1_5.new(self.trustly_publickey)
 
     def serialize_data(self, data=None):
-        ret = ''
-        if type(data) == types.ListType:
-            for k in sorted(data, key=lambda s: str(s)):
+        ret = six.text_type('')
+        if type(data) == list:
+            for k in data:
                 ret = ret + self.serialize_data(k)
-        elif type(data) == types.DictType:
-            for k in sorted(data.keys(), key=lambda s: str(s)):
-                ret = ret + k + self.serialize_data(data[k])
-        elif type(data) == types.UnicodeType:
-                return data.encode('utf-8')
+        elif type(data) == dict:
+            if six.PY2:
+                for k in sorted(list(data.keys()), cmp=locale.strcoll):
+                    ret = ret + six.text_type(k) + self.serialize_data(data[k])
+            else:
+                for k in sorted(list(data.keys()), key=functools.cmp_to_key(locale.strcoll)):
+                    ret = ret + six.text_type(k) + self.serialize_data(data[k])
         elif data is not None:
-            return str(data)
+            return six.text_type(data)
         return ret
 
     def _verify_trustly_signed_data(self, method, uuid, signature, data):
@@ -90,7 +103,7 @@ class API(object):
 
         decoded_signature = base64.b64decode(signature)
         plaintext = method + uuid + self.serialize_data(data)
-        sha1hash = SHA.new(plaintext)
+        sha1hash = SHA.new(plaintext.encode('utf-8'))
 
         return self.trustly_verifyer.verify(sha1hash, decoded_signature)
 
@@ -98,8 +111,7 @@ class API(object):
         method = response.get_method()
         uuid = response.get_uuid()
         signature = response.get_signature()
-        data = response.get_result()
-        data = data.get('data')
+        data = response.get_data()
 
         return self._verify_trustly_signed_data(method, uuid, signature, data)
 
@@ -111,13 +123,14 @@ class API(object):
 
         return self._verify_trustly_signed_data(method, uuid, signature, data)
 
-    def set_host(host=None, port=None, is_https=None):
-        if host is not None:
-            self.api_host = host
-            self.load_trustly_publickey()
+    def set_host(self, host=None, port=None, is_https=None):
+        if host is None:
+            host = self.api_host
 
-        if port is not None:
-            self.api_port = port
+        if port is None:
+            port = self.api_port
+
+        self.load_trustly_publickey(host, port)
 
         if is_https is not None:
             self.api_is_https = is_https
@@ -128,16 +141,16 @@ class API(object):
     def connect(self):
         try:
             if self.api_is_https:
-                call = httplib.HTTPSConnection(self.api_host, self.api_port)
+                call = six.moves.http_client.HTTPSConnection(self.api_host, self.api_port)
             else:
-                call = httplib.HTTPConnection(self.api_host, self.api_port)
+                call = six.moves.http_client.HTTPConnection(self.api_host, self.api_port)
 
         except Exception as e:
             raise trustly.exceptions.TrustlyConnectionError(str(e))
 
         return call
 
-        # Return the base url for the api. 
+        # Return the base url for the api.
     def base_url(self):
         if self.api_is_https:
             if self.api_port == 443:
@@ -153,7 +166,7 @@ class API(object):
         return url
 
     def handle_notification(self, httpbody):
-        request = trustly.data.jsonrpcnotificationrequest.JSONRPCNotificationRequest(httpbody) 
+        request = trustly.data.jsonrpcnotificationrequest.JSONRPCNotificationRequest(httpbody)
 
         if self.verify_trustly_signed_notification(request) != True:
             raise trustly.exceptions.TrustlySignatureError('Incoming notification signature is not valid', request)
@@ -207,7 +220,7 @@ class API(object):
         return self.handle_response(request, call)
 
         # Return the last trustly.data.request.Request class used to issue a
-        # call. Useful for debugging data actually transmitted to trustly. 
+        # call. Useful for debugging data actually transmitted to trustly.
         #
         # NOTE: This will contain bare login credentials, proper caution should
         # be done before dumping this to screen or a log file to ensure login
@@ -223,3 +236,5 @@ class API(object):
             else:
                 return '0'
         return None
+
+# vim: set et cindent ts=4 ts=4 sw=4:

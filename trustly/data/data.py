@@ -22,22 +22,20 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 """
 
+from __future__ import absolute_import
 import json
 import types
+import six
 
 class Data(object):
     payload = None
 
-    def __init__(self, payload=None):
-        if payload is not None:
-            self.payload = self.vacuum(payload)
-
-        if self.payload is None:
-            self.payload = {}
+    def __init__(self):
+        self.payload = {}
 
         # Vacuum out all keys being set to None in the data to be communicated
     def vacuum(self, data):
-        if type(data) == types.ListType:
+        if type(data) == list:
             ret = list()
             for k in data:
                 if k is not None:
@@ -50,9 +48,9 @@ class Data(object):
 
             return ret
 
-        elif type(data) == types.DictType:
+        elif type(data) == dict:
             ret = dict()
-            for (k, v) in data.iteritems():
+            for (k, v) in six.iteritems(data):
                 if v is not None:
                     v = self.vacuum(v)
                     if v is not None:
@@ -87,6 +85,8 @@ class Data(object):
     def json(self, pretty=False):
         data = self.get()
         if pretty:
-            return json.dumps(data, sort_keys=True, indent=4, separators=(',', ': '))
+            return json.dumps(data, ensure_ascii=False, sort_keys=True, indent=4, separators=(',', ': '))
         else:
             return json.dumps(data)
+
+# vim: set et cindent ts=4 ts=4 sw=4:

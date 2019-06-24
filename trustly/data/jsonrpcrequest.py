@@ -22,6 +22,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 """
 
+from __future__ import absolute_import
 import types
 
 import trustly.data.request
@@ -36,6 +37,7 @@ class JSONRPCRequest(trustly.data.request.Request):
         # TypeError will be issued.
         # method should be set to the name of the RPC method to call
     def __init__(self, method=None, data=None, attributes=None):
+        super(JSONRPCRequest, self).__init__()
 
         payload = None
         if data is not None or attributes is not None:
@@ -43,7 +45,7 @@ class JSONRPCRequest(trustly.data.request.Request):
             payload = dict(params=dict())
                 # Sanity check
             if data is not None:
-                if type(data) != types.DictType and attributes is not None:
+                if type(data) != dict and attributes is not None:
                     raise TypeError('Data must be dict if attributes is provided')
                 else:
                     payload['params']['Data'] = data
@@ -54,10 +56,10 @@ class JSONRPCRequest(trustly.data.request.Request):
             if attributes is not None:
                 payload['params']['Data']['Attributes'] = attributes
 
+            self.payload = self.vacuum(payload)
+
             # We do not relay the method in the super call as for the JSON RPC
             # we keep this value in the payload and manage it ourself.
-        super(JSONRPCRequest, self).__init__(payload=payload)
-
         if method is not None:
             self.payload['method'] = method
 
@@ -171,3 +173,5 @@ class JSONRPCRequest(trustly.data.request.Request):
             self.payload['Data']['Attributes'][name] = value
 
         return value
+
+# vim: set et cindent ts=4 ts=4 sw=4:

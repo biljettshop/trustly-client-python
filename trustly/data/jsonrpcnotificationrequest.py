@@ -22,6 +22,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 """
 
+from __future__ import absolute_import
 import json
 
 import trustly.data
@@ -31,13 +32,15 @@ class JSONRPCNotificationRequest(trustly.data.data.Data):
     notification_body = None
 
     def __init__(self, notification_body):
+        super(JSONRPCNotificationRequest, self).__init__()
+
         self.notification_body = notification_body
         try:
             payload = json.loads(self.notification_body)
+            if payload is not None:
+                self.payload = payload
         except ValueError as e:
             raise trustly.exceptions.TrustlyDataError(str(e))
-
-        super(JSONRPCNotificationRequest, self).__init__(payload=payload)
 
         if self.get_version() != '1.1':
             raise trustly.exceptions.TrustlyJSONRPCVersionError('JSON RPC Version {0} is not supported'.format(self.get_version()))
@@ -101,3 +104,5 @@ class JSONRPCNotificationRequest(trustly.data.data.Data):
             pass
 
         return None
+
+# vim: set et cindent ts=4 ts=4 sw=4:

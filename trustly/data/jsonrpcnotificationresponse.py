@@ -22,6 +22,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 """
 
+from __future__ import absolute_import
 import trustly.data.data
 
 class JSONRPCNotificationResponse(trustly.data.data.Data):
@@ -47,7 +48,7 @@ class JSONRPCNotificationResponse(trustly.data.data.Data):
     def set_success(self, success=None):
         status = 'OK'
         if success is not None and success != True:
-            status = 'FAILURE'
+            status = 'FAILED'
 
         self.set_data('status', status)
 
@@ -108,3 +109,5 @@ class JSONRPCNotificationResponse(trustly.data.data.Data):
 
     def get_uuid(self):
         return self.get_result('uuid')
+
+# vim: set et cindent ts=4 ts=4 sw=4:

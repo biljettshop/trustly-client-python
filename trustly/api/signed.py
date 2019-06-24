@@ -26,9 +26,9 @@ from __future__ import absolute_import
 import six.moves.http_client
 import uuid
 import base64
-from Crypto.Signature import PKCS1_v1_5
-from Crypto.Hash import SHA
-from Crypto.PublicKey import RSA
+
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import serialization, hashes
 
 import trustly.api.api
 import trustly.exceptions
@@ -70,8 +70,8 @@ class SignedAPI(trustly.api.api.API):
         self.use_merchant_privatekey(cert)
 
     def use_merchant_privatekey(self, cert):
-        self.merchant_privatekey = RSA.importKey(cert)
-        self.merchant_signer = PKCS1_v1_5.new(self.merchant_privatekey)
+        self.merchant_privatekey = serialization.load_pem_private_key(cert)
+        self.merchant_signer = self.merchant_privatekey
 
     def sign_merchant_request(self, data):
         if self.merchant_signer is None:
@@ -90,8 +90,10 @@ class SignedAPI(trustly.api.api.API):
             data = {}
 
         plaintext = six.text_type(method + uuid + self.serialize_data(data))
-        sha1hash = SHA.new(plaintext.encode('utf-8'))
-        signature = self.merchant_signer.sign(sha1hash)
+        digest = hashes.Hash(hashes.SHA1(), backend=default_backend())
+        digest.update(plaintext.encode('utf-8'))
+        digest.finalize()
+        signature = self.merchant_signer.sign(digest)
         if six.PY2:
             return base64.b64encode(signature)
         else:

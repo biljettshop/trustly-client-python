@@ -33,6 +33,7 @@ import six
 import six.moves.http_client
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.asymmetric import padding
 
 import trustly.exceptions
 import trustly.data.jsonrpcnotificationresponse
@@ -71,7 +72,7 @@ class API(object):
         self.api_host = api_host
         self.api_port = api_port
 
-        self.trustly_publickey = serialization.load_pem_public_key(trustly_pkey_str, default_backend())
+        self.trustly_publickey = serialization.load_pem_public_key(trustly_pkey_str, backend=default_backend())
         self.trustly_verifyer = self.trustly_publickey
 
     def serialize_data(self, data=None):
@@ -102,11 +103,18 @@ class API(object):
 
         decoded_signature = base64.b64decode(signature)
         plaintext = method + uuid + self.serialize_data(data)
-        sha1hash = hashes.Hash(hashes.SHA1(), backend=default_backend())
+        sha1hash = hashes.Hash(hashes.SHA256(), backend=default_backend())
         sha1hash.update(plaintext.encode('utf-8'))
-        sha1hash.finalize()
-
-        return self.trustly_verifyer.verify(sha1hash, decoded_signature)
+        print(plaintext)
+        return self.trustly_verifyer.verify(
+            decoded_signature,
+            sha1hash.finalize(),
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH,
+            ),
+            hashes.SHA256()
+        )
 
     def verify_trustly_signed_response(self, response):
         method = response.get_method()

@@ -29,6 +29,7 @@ import base64
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.asymmetric import padding
 
 import trustly.api.api
 import trustly.exceptions
@@ -64,13 +65,13 @@ class SignedAPI(trustly.api.api.API):
                 self.load_merchant_privatekey(merchant_privatekey)
 
     def load_merchant_privatekey(self, filename):
-        pkeyfile = open(filename, 'r')
+        pkeyfile = open(filename, 'rb')
         cert = pkeyfile.read()
         pkeyfile.close()
         self.use_merchant_privatekey(cert)
 
     def use_merchant_privatekey(self, cert):
-        self.merchant_privatekey = serialization.load_pem_private_key(cert, default_backend())
+        self.merchant_privatekey = serialization.load_pem_private_key(cert, password=None, backend=default_backend())
         self.merchant_signer = self.merchant_privatekey
 
     def sign_merchant_request(self, data):
@@ -90,10 +91,16 @@ class SignedAPI(trustly.api.api.API):
             data = {}
 
         plaintext = six.text_type(method + uuid + self.serialize_data(data))
-        digest = hashes.Hash(hashes.SHA1(), backend=default_backend())
+        digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
         digest.update(plaintext.encode('utf-8'))
-        digest.finalize()
-        signature = self.merchant_signer.sign(digest)
+        signature = self.merchant_signer.sign(
+            digest.finalize(),
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH,
+            ),
+            hashes.SHA256()
+        )
         if six.PY2:
             return base64.b64encode(signature)
         else:
